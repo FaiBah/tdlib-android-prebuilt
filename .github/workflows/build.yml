@@ -1,34 +1,51 @@
-name: Build TDLib ARM64 Android
+name: Build TDLib ARM64
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Required to commit & push
 
 jobs:
-  build-arm64:
+  build-and-push:
     runs-on: ubuntu-latest
 
     env:
       ANDROID_NDK: /usr/local/lib/android/ndk
 
     steps:
-    - name: Checkout TDLib
-      uses: actions/checkout@v3
+    # 1️⃣ Checkout repo
+    - uses: actions/checkout@v4
 
+    # 2️⃣ Get latest TDLib release
+    - name: Get latest TDLib version
+      id: get_version
+      run: |
+        VERSION=$(curl -s https://api.github.com/repos/tdlib/td/releases/latest | jq -r .tag_name)
+        echo "TDLIB_VERSION=$VERSION" >> $GITHUB_ENV
+        echo "TDLib version: $VERSION"
+
+    # 3️⃣ Clone TDLib
+    - name: Clone TDLib
+      run: git clone --branch ${{ env.TDLIB_VERSION }} https://github.com/tdlib/td.git
+
+    # 4️⃣ Install dependencies
+    - name: Install CMake & Ninja
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build
+
+    # 5️⃣ Setup Android NDK
     - name: Setup Android NDK
       uses: android-actions/setup-ndk@v2
       with:
         ndk-version: r25b
 
-    - name: Install CMake
-      run: sudo apt-get update && sudo apt-get install cmake -y
-
-    - name: Build TDLib for ARM64
+    # 6️⃣ Build TDLib for ARM64
+    - name: Build ARM64 .so
       run: |
-        git clone --branch v1.8.33 https://github.com/tdlib/td.git tdlib
-        mkdir -p tdlib/build-arm64
-        cd tdlib/build-arm64
+        mkdir -p td/build-arm64
+        cd td/build-arm64
         cmake .. \
           -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
           -DANDROID_ABI=arm64-v8a \
@@ -37,9 +54,20 @@ jobs:
           -DTD_ENABLE_JNI=ON \
           -DCMAKE_INSTALL_PREFIX=../tdlib-java
         cmake --build . --target install -- -j$(nproc)
+        echo "List TDLib lib folder:"
+        ls -l ../tdlib-java/lib
 
-    - name: Upload ARM64 artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: tdlib-arm64
-        path: tdlib/tdlib-java
+    # 7️⃣ Copy .so into versioned folder
+    - name: Copy .so into versioned folder
+      run: |
+        mkdir -p ./arm64-v8a/${{ env.TDLIB_VERSION }}
+        cp td/tdlib-java/lib/libtdjni.so ./arm64-v8a/${{ env.TDLIB_VERSION }}/
+
+    # 8️⃣ Commit & push
+    - name: Commit and push versioned .so
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add arm64-v8a/${{ env.TDLIB_VERSION }}/*.so
+        git commit -m "Update TDLib ARM64 .so ${{ env.TDLIB_VERSION }}" || exit 0
+        git push
