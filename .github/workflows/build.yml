@@ -1,73 +1,45 @@
-name: Build TDLib JNI ARM64
+name: Build TDLib ARM64 Android
 
-# ✅ Trigger manually via "Run workflow" button
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build-arm64:
-    name: Build TDLib + tdjni for Android ARM64
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_NDK: /usr/local/lib/android/ndk
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - name: Checkout TDLib
+      uses: actions/checkout@v3
 
-    - name: Set up JDK
-      uses: actions/setup-java@v3
+    - name: Setup Android NDK
+      uses: android-actions/setup-ndk@v2
       with:
-        distribution: temurin
-        java-version: 17
+        ndk-version: r25b
 
-    - name: Install Android SDK & NDK
-      uses: android-actions/setup-android@v3
-      with:
-        api-level: 31
-        ndk-version: 25.2.9519653
+    - name: Install CMake
+      run: sudo apt-get update && sudo apt-get install cmake -y
 
-    - name: Install build dependencies
+    - name: Build TDLib for ARM64
       run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake unzip wget build-essential
-
-    - name: Build TDLib (tdjson)
-      run: |
-        mkdir -p build/arm64 && cd build/arm64
-        cmake ../../tdlib \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+        git clone --branch v1.8.33 https://github.com/tdlib/td.git tdlib
+        mkdir -p tdlib/build-arm64
+        cd tdlib/build-arm64
+        cmake .. \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
           -DANDROID_ABI=arm64-v8a \
-          -DANDROID_PLATFORM=android-21 \
-          -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        cmake --build . --target tdjson -- -j$(nproc)
-
-    - name: Build tdjni
-      run: |
-        mkdir -p build/tdjni-arm64 && cd build/tdjni-arm64
-        cmake ../../tdlib/td/generate \
+          -DANDROID_PLATFORM=android-33 \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-          -DANDROID_ABI=arm64-v8a \
-          -DANDROID_PLATFORM=android-21 \
-          -DANDROID_STL=c++_shared
-        cmake --build . --target tdjni -- -j$(nproc)
+          -DTD_ENABLE_JNI=ON \
+          -DCMAKE_INSTALL_PREFIX=../tdlib-java
+        cmake --build . --target install -- -j$(nproc)
 
-    - name: Upload ARM64 tdjni
+    - name: Upload ARM64 artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: tdjni-arm64
-        path: build/tdjni-arm64
-
-    - name: Print local manual instructions
-      run: |
-        echo "Manual build steps for your machine:"
-        echo "1️⃣ Export NDK path: export ANDROID_NDK_HOME=/path/to/ndk"
-        echo "2️⃣ Build TDLib:"
-        echo "   mkdir -p build/arm64 && cd build/arm64"
-        echo "   cmake ../../tdlib -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=\$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 -DCMAKE_POSITION_INDEPENDENT_CODE=ON"
-        echo "   cmake --build . --target tdjson -- -j\$(nproc)"
-        echo "3️⃣ Build tdjni:"
-        echo "   mkdir -p ../tdjni-arm64 && cd ../tdjni-arm64"
-        echo "   cmake ../../tdlib/td/generate -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=\$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 -DANDROID_STL=c++_shared"
-        echo "   cmake --build . --target tdjni -- -j\$(nproc)"
-        echo "4️⃣ The resulting libtdjni.so will be in build/tdjni-arm64"
+        name: tdlib-arm64
+        path: tdlib/tdlib-java
