@@ -1,0 +1,74 @@
+name: Build TDLib for Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      tdlib_interface:
+        description: 'Interface type'
+        required: true
+        default: 'Java'
+        type: choice
+        options:
+          - Java
+          - JSON
+          - JSONJava
+      tdlib_commit:
+        description: 'TDLib commit hash (leave empty for latest)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    name: Build TDLib
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Clone TDLib
+        run: |
+          git clone https://github.com/tdlib/td.git
+          cd td
+          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
+            git checkout ${{ github.event.inputs.tdlib_commit }}
+          fi
+          echo "Building commit: $(git -C . rev-parse HEAD)"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TDLib via Docker
+        working-directory: td/example/android
+        run: |
+          COMMIT_ARG=""
+          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
+            COMMIT_ARG="--build-arg COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}"
+          fi
+
+          docker build \
+            --build-arg TDLIB_INTERFACE=${{ github.event.inputs.tdlib_interface }} \
+            $COMMIT_ARG \
+            --output tdlib \
+            .
+
+      - name: Upload tdlib.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-android-${{ github.event.inputs.tdlib_interface }}-${{ github.run_number }}
+          path: |
+            td/example/android/tdlib/tdlib.zip
+            td/example/android/tdlib/tdlib-debug.zip
+          retention-days: 30
+
+      - name: Upload .so libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-jni-libs-${{ github.run_number }}
+          path: td/example/android/tdlib/libs/
+          retention-days: 30
+
+      - name: Upload Java sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-java-sources-${{ github.run_number }}
+          path: td/example/android/tdlib/java/
+          retention-days: 30
