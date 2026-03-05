@@ -17,6 +17,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build TDLib
@@ -24,16 +27,27 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Clone TDLib
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+
+      - name: Clone TDLib & get version
         run: |
           git clone https://github.com/tdlib/td.git
           cd td
+
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
             git checkout ${{ github.event.inputs.tdlib_commit }}
           fi
-          TDLIB_VERSION=$(git -C . rev-parse --short HEAD)
+
+          # Get semantic version e.g. 1.8.62
+          TDLIB_VERSION=$(grep -oP '(?<=TDLib VERSION )\S+' CMakeLists.txt)
+
+          # Get short commit hash e.g. f3a9c12
+          TDLIB_COMMIT=$(git rev-parse --short HEAD)
+
           echo "TDLIB_VERSION=$TDLIB_VERSION" >> $GITHUB_ENV
-          echo "Building commit: $TDLIB_VERSION"
+          echo "TDLIB_COMMIT=$TDLIB_COMMIT" >> $GITHUB_ENV
+          echo "TDLib version: $TDLIB_VERSION (commit: $TDLIB_COMMIT)"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-${{ env.TDLIB_VERSION }}
+          key: ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-${{ env.TDLIB_COMMIT }}
           restore-keys: |
             ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-
             ${{ runner.os }}-buildx-
@@ -68,9 +82,18 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Upload tdlib.zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-android-${{ github.event.inputs.tdlib_interface }}-${{ github.run_number }}
-          path: td/example/android/tdlib/tdlib.zip
-          retention-days: 30
+      - name: Extract tdlib.zip to repo folder
+        run: |
+          mkdir -p tdlib/${{ env.TDLIB_VERSION }}
+          unzip td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
+
+      - name: Commit and push all extracted files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add tdlib/${{ env.TDLIB_VERSION }}/
+
+          git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ github.event.inputs.tdlib_interface }}]" || echo "Nothing to commit"
+
+          git push
