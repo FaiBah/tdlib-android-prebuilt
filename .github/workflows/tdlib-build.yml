@@ -95,6 +95,29 @@ jobs:
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
           unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
 
+      - name: Package per ABI zip (so + java sources)
+        run: |
+          VERSION=${{ env.TDLIB_VERSION }}
+          EXTRACTED=tdlib/$VERSION
+          JAVA_DIR=$EXTRACTED/java
+          LIBS_DIR=$EXTRACTED/libs
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            echo "Packaging $ABI..."
+            mkdir -p /tmp/tdlib-$ABI/libs/$ABI
+            mkdir -p /tmp/tdlib-$ABI/java
+
+            cp $LIBS_DIR/$ABI/libtdjni.so /tmp/tdlib-$ABI/libs/$ABI/
+            cp -r $JAVA_DIR/. /tmp/tdlib-$ABI/java/
+
+            cd /tmp/tdlib-$ABI
+            zip -r /tmp/tdlib-$ABI.zip .
+            cd -
+          done
+
+          echo "All ABI zips created:"
+          ls -lah /tmp/tdlib-*.zip
+
       - name: Commit and push all extracted files
         run: |
           git config user.name "github-actions[bot]"
@@ -124,19 +147,29 @@ jobs:
             | **Interface** | ${{ github.event.inputs.tdlib_interface }} |
 
             ## Download
-            - `tdlib.zip` — contains `.so` libs + Java sources (all ABI)
+            | File | Contains | ABI |
+            |---|---|---|
+            | `tdlib.zip` | all `.so` + java sources | all |
+            | `tdlib-debug.zip` | all `.so` debug + java sources | all |
+            | `tdlib-arm64-v8a.zip` | `libtdjni.so` + java sources | arm64-v8a |
+            | `tdlib-armeabi-v7a.zip` | `libtdjni.so` + java sources | armeabi-v7a |
+            | `tdlib-x86.zip` | `libtdjni.so` + java sources | x86 |
+            | `tdlib-x86_64.zip` | `libtdjni.so` + java sources | x86_64 |
 
             ## Usage
-            Extract `tdlib.zip` and copy into your Android project:
+            Extract any zip and copy into your Android project:
             ```
             app/src/main/
             ├── jniLibs/
-            │   ├── arm64-v8a/libtdjni.so
-            │   ├── armeabi-v7a/libtdjni.so
-            │   ├── x86/libtdjni.so
-            │   └── x86_64/libtdjni.so
+            │   └── arm64-v8a/libtdjni.so
             └── java/org/drinkless/tdlib/
                 ├── Client.java
                 └── TdApi.java
             ```
-          files: td/example/android/tdlib/tdlib.zip
+          files: |
+            td/example/android/tdlib/tdlib.zip
+            td/example/android/tdlib/tdlib-debug.zip
+            /tmp/tdlib-arm64-v8a.zip
+            /tmp/tdlib-armeabi-v7a.zip
+            /tmp/tdlib-x86.zip
+            /tmp/tdlib-x86_64.zip
