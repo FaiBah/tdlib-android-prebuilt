@@ -93,7 +93,7 @@ jobs:
           fi
 
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
-          unzip td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
+          unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
 
       - name: Commit and push all extracted files
         run: |
