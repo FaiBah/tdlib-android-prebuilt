@@ -22,7 +22,6 @@ permissions:
   contents: write
 
 jobs:
-  # ── Decide which interfaces to build ──────────────────────────────
   prepare:
     name: Prepare build matrix
     runs-on: ubuntu-22.04
@@ -38,14 +37,13 @@ jobs:
             echo 'matrix=["${{ github.event.inputs.tdlib_interface }}"]' >> $GITHUB_OUTPUT
           fi
 
-  # ── Build each interface in parallel ──────────────────────────────
   build:
     name: Build TDLib [${{ matrix.interface }}]
     needs: prepare
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     strategy:
-      fail-fast: false    # ← one failure won't cancel others
+      fail-fast: false
       matrix:
         interface: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
@@ -157,13 +155,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git pull --rebase origin main
-
           git add tdlib/v${{ env.TDLIB_VERSION }}/
 
-          git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ matrix.interface }}]" || echo "Nothing to commit"
-
-          git push
+          # Retry up to 5 times to handle parallel push conflicts
+          for i in 1 2 3 4 5; do
+            echo "Push attempt $i..."
+            git pull --rebase origin main || true
+            git add tdlib/v${{ env.TDLIB_VERSION }}/
+            git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ matrix.interface }}]" || echo "Nothing to commit"
+            git push && echo "Push successful!" && break
+            echo "Push failed, retrying in 5 seconds..."
+            sleep 5
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
