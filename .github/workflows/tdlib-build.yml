@@ -92,13 +92,22 @@ jobs:
             exit 1
           fi
 
+          # Extract to temp first
+          mkdir -p /tmp/tdlib-extract
+          unzip -o td/example/android/tdlib/tdlib.zip -d /tmp/tdlib-extract/
+
+          # Move contents of inner tdlib/ directly to versioned folder
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
-          unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
+          mv /tmp/tdlib-extract/tdlib/* tdlib/${{ env.TDLIB_VERSION }}/
+          rm -rf /tmp/tdlib-extract
+
+          echo "=== Final structure ==="
+          find tdlib/${{ env.TDLIB_VERSION }} -type f
 
       - name: Package per ABI zip (so + java sources)
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
-          EXTRACTED=tdlib/$VERSION/tdlib
+          EXTRACTED=tdlib/$VERSION
           JAVA_DIR=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
 
