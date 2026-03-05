@@ -1,4 +1,4 @@
-name: Build TDLib for Android (Release)
+name: Build TDLib for Android
 
 on:
   workflow_dispatch:
