@@ -31,10 +31,21 @@ jobs:
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
             git checkout ${{ github.event.inputs.tdlib_commit }}
           fi
-          echo "Building commit: $(git -C . rev-parse HEAD)"
+          TDLIB_VERSION=$(git -C . rev-parse --short HEAD)
+          echo "TDLIB_VERSION=$TDLIB_VERSION" >> $GITHUB_ENV
+          echo "Building commit: $TDLIB_VERSION"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-${{ env.TDLIB_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-
+            ${{ runner.os }}-buildx-
 
       - name: Build TDLib via Docker
         working-directory: td/example/android
@@ -44,31 +55,22 @@ jobs:
             COMMIT_ARG="--build-arg COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}"
           fi
 
-          docker build \
+          docker buildx build \
             --build-arg TDLIB_INTERFACE=${{ github.event.inputs.tdlib_interface }} \
             $COMMIT_ARG \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
             --output tdlib \
             .
+
+      - name: Rotate cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Upload tdlib.zip
         uses: actions/upload-artifact@v4
         with:
           name: tdlib-android-${{ github.event.inputs.tdlib_interface }}-${{ github.run_number }}
-          path: |
-            td/example/android/tdlib/tdlib.zip
-            td/example/android/tdlib/tdlib-debug.zip
-          retention-days: 30
-
-      - name: Upload .so libs
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-jni-libs-${{ github.run_number }}
-          path: td/example/android/tdlib/libs/
-          retention-days: 30
-
-      - name: Upload Java sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-java-sources-${{ github.run_number }}
-          path: td/example/android/tdlib/java/
+          path: td/example/android/tdlib/tdlib.zip
           retention-days: 30
