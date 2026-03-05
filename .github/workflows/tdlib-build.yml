@@ -95,6 +95,12 @@ jobs:
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
           unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
 
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Package per ABI zip (so + java sources)
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
@@ -117,6 +123,67 @@ jobs:
 
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
+
+      - name: Build tdlib.jar
+        run: |
+          VERSION=${{ env.TDLIB_VERSION }}
+          JAVA_SRC=tdlib/$VERSION/tdlib/java
+
+          mkdir -p /tmp/jar-classes
+
+          # Compile .java → .class
+          find $JAVA_SRC -name "*.java" | xargs javac \
+            -source 8 -target 8 \
+            -d /tmp/jar-classes
+
+          # Package .class → .jar
+          cd /tmp/jar-classes
+          jar cf /tmp/tdlib.jar .
+          cd -
+
+          echo "tdlib.jar created:"
+          ls -lah /tmp/tdlib.jar
+
+      - name: Build tdlib.aar
+        run: |
+          VERSION=${{ env.TDLIB_VERSION }}
+          EXTRACTED=tdlib/$VERSION/tdlib
+          JAVA_SRC=$EXTRACTED/java
+          LIBS_DIR=$EXTRACTED/libs
+
+          mkdir -p /tmp/aar-build/jni
+          mkdir -p /tmp/aar-classes
+
+          # Compile .java → .class → classes.jar
+          find $JAVA_SRC -name "*.java" | xargs javac \
+            -source 8 -target 8 \
+            -d /tmp/aar-classes
+
+          cd /tmp/aar-classes
+          jar cf /tmp/aar-build/classes.jar .
+          cd -
+
+          # Copy .so files per ABI
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            mkdir -p /tmp/aar-build/jni/$ABI
+            cp $LIBS_DIR/$ABI/libtdjni.so /tmp/aar-build/jni/$ABI/
+          done
+
+          # Create AndroidManifest.xml
+          cat > /tmp/aar-build/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="org.drinkless.tdlib">
+          </manifest>
+          EOF
+
+          # Package everything → .aar (aar is just a zip)
+          cd /tmp/aar-build
+          zip -r /tmp/tdlib.aar .
+          cd -
+
+          echo "tdlib.aar created:"
+          ls -lah /tmp/tdlib.aar
 
       - name: Commit and push all extracted files
         run: |
@@ -147,17 +214,24 @@ jobs:
             | **Interface** | ${{ github.event.inputs.tdlib_interface }} |
 
             ## Download
-            | File | Contains | ABI |
+            | File | Contains | Use case |
             |---|---|---|
-            | `tdlib.zip` | all `.so` + java sources | all |
-            | `tdlib-debug.zip` | all `.so` debug + java sources | all |
-            | `tdlib-arm64-v8a.zip` | `libtdjni.so` + java sources | arm64-v8a |
-            | `tdlib-armeabi-v7a.zip` | `libtdjni.so` + java sources | armeabi-v7a |
-            | `tdlib-x86.zip` | `libtdjni.so` + java sources | x86 |
-            | `tdlib-x86_64.zip` | `libtdjni.so` + java sources | x86_64 |
+            | `tdlib.zip` | all `.so` + java sources | manual setup |
+            | `tdlib-debug.zip` | all `.so` debug + java sources | debugging |
+            | `tdlib.jar` | compiled java sources only | java library |
+            | `tdlib.aar` | all `.so` + compiled java | android library ✅ |
+            | `tdlib-arm64-v8a.zip` | `libtdjni.so` + java sources | arm64 only |
+            | `tdlib-armeabi-v7a.zip` | `libtdjni.so` + java sources | armeabi only |
+            | `tdlib-x86.zip` | `libtdjni.so` + java sources | x86 only |
+            | `tdlib-x86_64.zip` | `libtdjni.so` + java sources | x86_64 only |
 
-            ## Usage
-            Extract any zip and copy into your Android project:
+            ## Quickest way to use (aar)
+            ```groovy
+            // build.gradle
+            implementation files('libs/tdlib.aar')
+            ```
+
+            ## Manual setup (zip)
             ```
             app/src/main/
             ├── jniLibs/
@@ -169,6 +243,8 @@ jobs:
           files: |
             td/example/android/tdlib/tdlib.zip
             td/example/android/tdlib/tdlib-debug.zip
+            /tmp/tdlib.jar
+            /tmp/tdlib.aar
             /tmp/tdlib-arm64-v8a.zip
             /tmp/tdlib-armeabi-v7a.zip
             /tmp/tdlib-x86.zip
