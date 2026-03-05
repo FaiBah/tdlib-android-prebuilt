@@ -34,18 +34,23 @@ jobs:
         run: |
           git clone https://github.com/tdlib/td.git
           cd td
+
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
             git checkout ${{ github.event.inputs.tdlib_commit }}
           fi
+
           TDLIB_VERSION=$(grep -oP '(?<=TDLib VERSION )\S+' CMakeLists.txt)
           TDLIB_COMMIT=$(git rev-parse --short HEAD)
+
           if [ -z "$TDLIB_VERSION" ]; then
             echo "ERROR: TDLIB_VERSION is empty!"
             exit 1
           fi
+
           echo "TDLIB_VERSION=$TDLIB_VERSION" >> $GITHUB_ENV
           echo "TDLIB_COMMIT=$TDLIB_COMMIT" >> $GITHUB_ENV
           echo "TDLib version: $TDLIB_VERSION (commit: $TDLIB_COMMIT)"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -57,6 +62,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-
             ${{ runner.os }}-buildx-
+
       - name: Build TDLib via Docker
         working-directory: td/example/android
         run: |
@@ -64,6 +70,7 @@ jobs:
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
             COMMIT_ARG="--build-arg COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}"
           fi
+
           docker buildx build \
             --build-arg TDLIB_INTERFACE=${{ github.event.inputs.tdlib_interface }} \
             $COMMIT_ARG \
@@ -71,45 +78,59 @@ jobs:
             --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
             --output tdlib \
             .
+
       - name: Rotate cache
         if: success()
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
       - name: Verify & extract tdlib.zip
         run: |
           if [ ! -f td/example/android/tdlib/tdlib.zip ]; then
             echo "ERROR: tdlib.zip not found!"
             exit 1
           fi
+
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
           unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
+
       - name: Package per ABI zip (so + java sources)
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
           EXTRACTED=tdlib/$VERSION/tdlib
           JAVA_DIR=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
+
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             echo "Packaging $ABI..."
             mkdir -p /tmp/tdlib-$ABI/libs/$ABI
             mkdir -p /tmp/tdlib-$ABI/java
+
             cp $LIBS_DIR/$ABI/libtdjni.so /tmp/tdlib-$ABI/libs/$ABI/
             cp -r $JAVA_DIR/. /tmp/tdlib-$ABI/java/
+
             cd /tmp/tdlib-$ABI
             zip -r /tmp/tdlib-$ABI.zip .
             cd -
           done
+
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
+
       - name: Commit and push all extracted files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git pull --rebase origin main
+
           git add tdlib/${{ env.TDLIB_VERSION }}/
+
           git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ github.event.inputs.tdlib_interface }}]" || echo "Nothing to commit"
+
           git push
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -118,10 +139,13 @@ jobs:
           make_latest: true
           body: |
             ## TDLib ${{ env.TDLIB_VERSION }} — Android Prebuilt
+
             | | |
+            |---|---|
             | **Version** | ${{ env.TDLIB_VERSION }} |
             | **Commit** | ${{ env.TDLIB_COMMIT }} |
             | **Interface** | ${{ github.event.inputs.tdlib_interface }} |
+
             ## Download
             | File | Contains | ABI |
             |---|---|---|
@@ -131,6 +155,7 @@ jobs:
             | `tdlib-armeabi-v7a.zip` | `libtdjni.so` + java sources | armeabi-v7a |
             | `tdlib-x86.zip` | `libtdjni.so` + java sources | x86 |
             | `tdlib-x86_64.zip` | `libtdjni.so` + java sources | x86_64 |
+
             ## Usage
             Extract any zip and copy into your Android project:
             ```
