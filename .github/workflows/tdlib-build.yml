@@ -129,11 +129,25 @@ jobs:
           VERSION=${{ env.TDLIB_VERSION }}
           JAVA_SRC=tdlib/$VERSION/tdlib/java
 
+          # Download Android SDK compile tools
+          sudo apt-get install -y android-sdk
+          ANDROID_JAR=$(find /usr -name "android.jar" 2>/dev/null | head -1)
+
+          # Fallback: download android.jar directly
+          if [ -z "$ANDROID_JAR" ]; then
+            wget -q https://github.com/Sable/android-platforms/raw/master/android-34/android.jar \
+              -O /tmp/android.jar
+            ANDROID_JAR=/tmp/android.jar
+          fi
+
+          echo "Using android.jar: $ANDROID_JAR"
+
           mkdir -p /tmp/jar-classes
 
-          # Compile .java → .class
+          # Compile .java → .class with Android SDK classpath
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
+            -classpath $ANDROID_JAR \
             -d /tmp/jar-classes
 
           # Package .class → .jar
@@ -151,12 +165,18 @@ jobs:
           JAVA_SRC=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
 
+          ANDROID_JAR=$(find /usr -name "android.jar" 2>/dev/null | head -1)
+          if [ -z "$ANDROID_JAR" ]; then
+            ANDROID_JAR=/tmp/android.jar  # reuse from previous step
+          fi
+
           mkdir -p /tmp/aar-build/jni
           mkdir -p /tmp/aar-classes
 
           # Compile .java → .class → classes.jar
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
+            -classpath $ANDROID_JAR \
             -d /tmp/aar-classes
 
           cd /tmp/aar-classes
@@ -177,7 +197,7 @@ jobs:
           </manifest>
           EOF
 
-          # Package everything → .aar (aar is just a zip)
+          # Package everything → .aar
           cd /tmp/aar-build
           zip -r /tmp/tdlib.aar .
           cd -
