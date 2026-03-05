@@ -175,33 +175,12 @@ jobs:
           name: TDLib ${{ env.TDLIB_VERSION }} [${{ matrix.interface }}]
           make_latest: true
           body: |
-            ## TDLib ${{ env.TDLIB_VERSION }} — Android Prebuilt
-
-            | | |
-            |---|---|
-            | **Version** | ${{ env.TDLIB_VERSION }} |
-            | **Commit** | ${{ env.TDLIB_COMMIT }} |
-            | **Interface** | ${{ matrix.interface }} |
-
-            ## Download
-            | File | Contains | ABI |
-            |---|---|---|
-            | `tdlib.zip` | all `.so` + java sources | all |
-            | `tdlib-debug.zip` | all `.so` debug + java sources | all |
-            | `tdlib-arm64-v8a.zip` | `.so` + java sources | arm64-v8a |
-            | `tdlib-armeabi-v7a.zip` | `.so` + java sources | armeabi-v7a |
-            | `tdlib-x86.zip` | `.so` + java sources | x86 |
-            | `tdlib-x86_64.zip` | `.so` + java sources | x86_64 |
-
-            ## Usage
-            Extract any zip and copy into your Android project:
             ```
-            app/src/main/
-            ├── jniLibs/
-            │   └── arm64-v8a/libtdjni.so
-            └── java/org/drinkless/tdlib/
-                ├── Client.java
-                └── TdApi.java
+            Version   : ${{ env.TDLIB_VERSION }}
+            Commit    : ${{ env.TDLIB_COMMIT }}
+            Interface : ${{ matrix.interface }}
+            Built     : ${{ github.event.repository.updated_at }}
+            Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
             ```
           files: |
             td/example/android/tdlib/tdlib.zip
