@@ -12,6 +12,7 @@ on:
           - Java
           - JSON
           - JSONJava
+          - All
       tdlib_commit:
         description: 'TDLib commit hash (leave empty for latest)'
         required: false
@@ -21,10 +22,32 @@ permissions:
   contents: write
 
 jobs:
+  # ── Decide which interfaces to build ──────────────────────────────
+  prepare:
+    name: Prepare build matrix
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event.inputs.tdlib_interface }}" = "All" ]; then
+            echo 'matrix=["Java","JSON","JSONJava"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["${{ github.event.inputs.tdlib_interface }}"]' >> $GITHUB_OUTPUT
+          fi
+
+  # ── Build each interface in parallel ──────────────────────────────
   build:
-    name: Build TDLib
+    name: Build TDLib [${{ matrix.interface }}]
+    needs: prepare
     runs-on: ubuntu-22.04
     timeout-minutes: 360
+    strategy:
+      fail-fast: false    # ← one failure won't cancel others
+      matrix:
+        interface: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
       - name: Checkout your repo
@@ -58,9 +81,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-${{ env.TDLIB_COMMIT }}
+          key: ${{ runner.os }}-buildx-${{ matrix.interface }}-${{ env.TDLIB_COMMIT }}
           restore-keys: |
-            ${{ runner.os }}-buildx-${{ github.event.inputs.tdlib_interface }}-
+            ${{ runner.os }}-buildx-${{ matrix.interface }}-
             ${{ runner.os }}-buildx-
 
       - name: Build TDLib via Docker
@@ -72,7 +95,7 @@ jobs:
           fi
 
           docker buildx build \
-            --build-arg TDLIB_INTERFACE=${{ github.event.inputs.tdlib_interface }} \
+            --build-arg TDLIB_INTERFACE=${{ matrix.interface }} \
             $COMMIT_ARG \
             --cache-from type=local,src=/tmp/.buildx-cache \
             --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
@@ -92,32 +115,34 @@ jobs:
             exit 1
           fi
 
-          # Extract to temp first
           mkdir -p /tmp/tdlib-extract
           unzip -o td/example/android/tdlib/tdlib.zip -d /tmp/tdlib-extract/
 
-          # Move contents of inner tdlib/ directly to versioned folder
-          mkdir -p tdlib/${{ env.TDLIB_VERSION }}
-          mv /tmp/tdlib-extract/tdlib/* tdlib/${{ env.TDLIB_VERSION }}/
+          mkdir -p tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}
+          cp -r /tmp/tdlib-extract/tdlib/. tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}/
           rm -rf /tmp/tdlib-extract
 
           echo "=== Final structure ==="
-          find tdlib/${{ env.TDLIB_VERSION }} -type f
+          find tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }} -type f
 
       - name: Package per ABI zip (so + java sources)
         run: |
-          VERSION=${{ env.TDLIB_VERSION }}
-          EXTRACTED=tdlib/$VERSION
-          JAVA_DIR=$EXTRACTED/java
+          EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}
           LIBS_DIR=$EXTRACTED/libs
+
+          SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
+          echo "Detected .so file: $SO_FILE"
 
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             echo "Packaging $ABI..."
             mkdir -p /tmp/tdlib-$ABI/libs/$ABI
-            mkdir -p /tmp/tdlib-$ABI/java
 
-            cp $LIBS_DIR/$ABI/libtdjni.so /tmp/tdlib-$ABI/libs/$ABI/
-            cp -r $JAVA_DIR/. /tmp/tdlib-$ABI/java/
+            cp $LIBS_DIR/$ABI/$SO_FILE /tmp/tdlib-$ABI/libs/$ABI/
+
+            if [ -d "$EXTRACTED/java" ]; then
+              mkdir -p /tmp/tdlib-$ABI/java
+              cp -r $EXTRACTED/java/. /tmp/tdlib-$ABI/java/
+            fi
 
             cd /tmp/tdlib-$ABI
             zip -r /tmp/tdlib-$ABI.zip .
@@ -134,17 +159,17 @@ jobs:
 
           git pull --rebase origin main
 
-          git add tdlib/${{ env.TDLIB_VERSION }}/
+          git add tdlib/v${{ env.TDLIB_VERSION }}/
 
-          git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ github.event.inputs.tdlib_interface }}]" || echo "Nothing to commit"
+          git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ matrix.interface }}]" || echo "Nothing to commit"
 
           git push
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.TDLIB_VERSION }}-${{ github.event.inputs.tdlib_interface }}
-          name: TDLib ${{ env.TDLIB_VERSION }} [${{ github.event.inputs.tdlib_interface }}]
+          tag_name: v${{ env.TDLIB_VERSION }}-${{ matrix.interface }}
+          name: TDLib ${{ env.TDLIB_VERSION }} [${{ matrix.interface }}]
           make_latest: true
           body: |
             ## TDLib ${{ env.TDLIB_VERSION }} — Android Prebuilt
@@ -153,17 +178,17 @@ jobs:
             |---|---|
             | **Version** | ${{ env.TDLIB_VERSION }} |
             | **Commit** | ${{ env.TDLIB_COMMIT }} |
-            | **Interface** | ${{ github.event.inputs.tdlib_interface }} |
+            | **Interface** | ${{ matrix.interface }} |
 
             ## Download
             | File | Contains | ABI |
             |---|---|---|
             | `tdlib.zip` | all `.so` + java sources | all |
             | `tdlib-debug.zip` | all `.so` debug + java sources | all |
-            | `tdlib-arm64-v8a.zip` | `libtdjni.so` + java sources | arm64-v8a |
-            | `tdlib-armeabi-v7a.zip` | `libtdjni.so` + java sources | armeabi-v7a |
-            | `tdlib-x86.zip` | `libtdjni.so` + java sources | x86 |
-            | `tdlib-x86_64.zip` | `libtdjni.so` + java sources | x86_64 |
+            | `tdlib-arm64-v8a.zip` | `.so` + java sources | arm64-v8a |
+            | `tdlib-armeabi-v7a.zip` | `.so` + java sources | armeabi-v7a |
+            | `tdlib-x86.zip` | `.so` + java sources | x86 |
+            | `tdlib-x86_64.zip` | `.so` + java sources | x86_64 |
 
             ## Usage
             Extract any zip and copy into your Android project:
