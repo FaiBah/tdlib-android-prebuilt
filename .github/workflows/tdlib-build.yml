@@ -124,30 +124,36 @@ jobs:
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
 
+      - name: Set up Android SDK tools
+        run: |
+          # GitHub Actions ubuntu-22.04 has Android SDK at $ANDROID_SDK_ROOT
+          ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
+
+          # Accept licenses and install build tools + platforms
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+          ANDROID_JAR=$ANDROID_SDK_ROOT/platforms/android-34/android.jar
+          ANNOTATION_JAR=$(find $ANDROID_SDK_ROOT -name "annotation*.jar" 2>/dev/null | head -1)
+
+          echo "ANDROID_JAR=$ANDROID_JAR" >> $GITHUB_ENV
+          echo "ANNOTATION_JAR=$ANNOTATION_JAR" >> $GITHUB_ENV
+          echo "BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/34.0.0" >> $GITHUB_ENV
+
+          echo "Android JAR: $ANDROID_JAR"
+          echo "Annotation JAR: $ANNOTATION_JAR"
+
       - name: Build tdlib.jar
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
           JAVA_SRC=tdlib/$VERSION/tdlib/java
 
-          # Download Android SDK compile tools
-          sudo apt-get install -y android-sdk
-          ANDROID_JAR=$(find /usr -name "android.jar" 2>/dev/null | head -1)
-
-          # Fallback: download android.jar directly
-          if [ -z "$ANDROID_JAR" ]; then
-            wget -q https://github.com/Sable/android-platforms/raw/master/android-34/android.jar \
-              -O /tmp/android.jar
-            ANDROID_JAR=/tmp/android.jar
-          fi
-
-          echo "Using android.jar: $ANDROID_JAR"
-
           mkdir -p /tmp/jar-classes
 
-          # Compile .java → .class with Android SDK classpath
+          # Compile .java → .class
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
-            -classpath $ANDROID_JAR \
+            -classpath ${{ env.ANDROID_JAR }}:${{ env.ANNOTATION_JAR }} \
             -d /tmp/jar-classes
 
           # Package .class → .jar
@@ -155,8 +161,7 @@ jobs:
           jar cf /tmp/tdlib.jar .
           cd -
 
-          echo "tdlib.jar created:"
-          ls -lah /tmp/tdlib.jar
+          echo "tdlib.jar size: $(ls -lah /tmp/tdlib.jar)"
 
       - name: Build tdlib.aar
         run: |
@@ -165,18 +170,13 @@ jobs:
           JAVA_SRC=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
 
-          ANDROID_JAR=$(find /usr -name "android.jar" 2>/dev/null | head -1)
-          if [ -z "$ANDROID_JAR" ]; then
-            ANDROID_JAR=/tmp/android.jar  # reuse from previous step
-          fi
-
           mkdir -p /tmp/aar-build/jni
           mkdir -p /tmp/aar-classes
 
           # Compile .java → .class → classes.jar
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
-            -classpath $ANDROID_JAR \
+            -classpath ${{ env.ANDROID_JAR }}:${{ env.ANNOTATION_JAR }} \
             -d /tmp/aar-classes
 
           cd /tmp/aar-classes
@@ -197,13 +197,12 @@ jobs:
           </manifest>
           EOF
 
-          # Package everything → .aar
+          # Package → .aar
           cd /tmp/aar-build
           zip -r /tmp/tdlib.aar .
           cd -
 
-          echo "tdlib.aar created:"
-          ls -lah /tmp/tdlib.aar
+          echo "tdlib.aar size: $(ls -lah /tmp/tdlib.aar)"
 
       - name: Commit and push all extracted files
         run: |
