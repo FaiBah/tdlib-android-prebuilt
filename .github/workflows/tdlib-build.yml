@@ -157,7 +157,6 @@ jobs:
 
           git add tdlib/v${{ env.TDLIB_VERSION }}/
 
-          # Retry up to 5 times to handle parallel push conflicts
           for i in 1 2 3 4 5; do
             echo "Push attempt $i..."
             git pull --rebase origin main || true
@@ -184,7 +183,6 @@ jobs:
             ```
           files: |
             td/example/android/tdlib/tdlib.zip
-            td/example/android/tdlib/tdlib-debug.zip
             /tmp/tdlib-arm64-v8a.zip
             /tmp/tdlib-armeabi-v7a.zip
             /tmp/tdlib-x86.zip
