@@ -95,12 +95,6 @@ jobs:
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
           unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
       - name: Package per ABI zip (so + java sources)
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
@@ -124,39 +118,34 @@ jobs:
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
 
-      - name: Set up Android SDK tools
-        run: |
-          # GitHub Actions ubuntu-22.04 has Android SDK at $ANDROID_SDK_ROOT
-          ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-          # Accept licenses and install build tools + platforms
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
-          ANDROID_JAR=$ANDROID_SDK_ROOT/platforms/android-34/android.jar
-          ANNOTATION_JAR=$(find $ANDROID_SDK_ROOT -name "annotation*.jar" 2>/dev/null | head -1)
-
-          echo "ANDROID_JAR=$ANDROID_JAR" >> $GITHUB_ENV
-          echo "ANNOTATION_JAR=$ANNOTATION_JAR" >> $GITHUB_ENV
-          echo "BUILD_TOOLS=$ANDROID_SDK_ROOT/build-tools/34.0.0" >> $GITHUB_ENV
-
-          echo "Android JAR: $ANDROID_JAR"
-          echo "Annotation JAR: $ANNOTATION_JAR"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34'
 
       - name: Build tdlib.jar
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
           JAVA_SRC=tdlib/$VERSION/tdlib/java
+          ANDROID_JAR=$ANDROID_SDK_ROOT/platforms/android-34/android.jar
+          ANNOTATION_JAR=$(find $ANDROID_SDK_ROOT -name "annotation*.jar" 2>/dev/null | head -1)
+
+          echo "ANDROID_JAR: $ANDROID_JAR"
+          echo "ANNOTATION_JAR: $ANNOTATION_JAR"
 
           mkdir -p /tmp/jar-classes
 
-          # Compile .java → .class
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
-            -classpath ${{ env.ANDROID_JAR }}:${{ env.ANNOTATION_JAR }} \
+            -classpath $ANDROID_JAR:$ANNOTATION_JAR \
             -d /tmp/jar-classes
 
-          # Package .class → .jar
           cd /tmp/jar-classes
           jar cf /tmp/tdlib.jar .
           cd -
@@ -169,27 +158,26 @@ jobs:
           EXTRACTED=tdlib/$VERSION/tdlib
           JAVA_SRC=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
+          ANDROID_JAR=$ANDROID_SDK_ROOT/platforms/android-34/android.jar
+          ANNOTATION_JAR=$(find $ANDROID_SDK_ROOT -name "annotation*.jar" 2>/dev/null | head -1)
 
           mkdir -p /tmp/aar-build/jni
           mkdir -p /tmp/aar-classes
 
-          # Compile .java → .class → classes.jar
           find $JAVA_SRC -name "*.java" | xargs javac \
             -source 8 -target 8 \
-            -classpath ${{ env.ANDROID_JAR }}:${{ env.ANNOTATION_JAR }} \
+            -classpath $ANDROID_JAR:$ANNOTATION_JAR \
             -d /tmp/aar-classes
 
           cd /tmp/aar-classes
           jar cf /tmp/aar-build/classes.jar .
           cd -
 
-          # Copy .so files per ABI
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             mkdir -p /tmp/aar-build/jni/$ABI
             cp $LIBS_DIR/$ABI/libtdjni.so /tmp/aar-build/jni/$ABI/
           done
 
-          # Create AndroidManifest.xml
           cat > /tmp/aar-build/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -197,7 +185,6 @@ jobs:
           </manifest>
           EOF
 
-          # Package → .aar
           cd /tmp/aar-build
           zip -r /tmp/tdlib.aar .
           cd -
@@ -246,7 +233,6 @@ jobs:
 
             ## Quickest way to use (aar)
             ```groovy
-            // build.gradle
             implementation files('libs/tdlib.aar')
             ```
 
