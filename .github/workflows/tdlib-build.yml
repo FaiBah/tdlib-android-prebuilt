@@ -95,13 +95,10 @@ jobs:
           mkdir -p tdlib/${{ env.TDLIB_VERSION }}
           unzip -o td/example/android/tdlib/tdlib.zip -d tdlib/${{ env.TDLIB_VERSION }}/
 
-          echo "=== Extracted structure ==="
-          find tdlib/${{ env.TDLIB_VERSION }} -type f
-
       - name: Package per ABI zip (so + java sources)
         run: |
           VERSION=${{ env.TDLIB_VERSION }}
-          EXTRACTED=tdlib/$VERSION
+          EXTRACTED=tdlib/$VERSION/tdlib
           JAVA_DIR=$EXTRACTED/java
           LIBS_DIR=$EXTRACTED/libs
 
