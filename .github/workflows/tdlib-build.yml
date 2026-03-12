@@ -143,13 +143,11 @@ jobs:
           name: TDLib ${{ env.TDLIB_VERSION }} [Java]
           make_latest: true
           body: |
-```
             Version   : ${{ env.TDLIB_VERSION }}
             Commit    : ${{ env.TDLIB_COMMIT }}
             Interface : Java
             Built     : ${{ env.BUILD_TIME }}
             Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
-```
           files: |
             td/example/android/tdlib/tdlib.zip
             /tmp/tdlib-arm64-v8a.zip
