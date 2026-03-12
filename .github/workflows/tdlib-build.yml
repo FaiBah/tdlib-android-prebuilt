@@ -2,19 +2,9 @@ name: Build TDLib for Android (Release)
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # runs every day at midnight
+    - cron: '0 0 */5 * *'
   workflow_dispatch:
     inputs:
-      tdlib_interface:
-        description: 'Interface type'
-        required: true
-        default: 'Java'
-        type: choice
-        options:
-          - Java
-          - JSON
-          - JSONJava
-          - All
       tdlib_commit:
         description: 'TDLib commit hash (leave empty for latest)'
         required: false
@@ -24,30 +14,10 @@ permissions:
   contents: write
 
 jobs:
-  prepare:
-    name: Prepare build matrix
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Set matrix
-        id: set-matrix
-        run: |
-          if [ "${{ github.event.inputs.tdlib_interface }}" = "All" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-            echo 'matrix=["Java","JSON","JSONJava"]' >> $GITHUB_OUTPUT
-          else
-            echo 'matrix=["${{ github.event.inputs.tdlib_interface }}"]' >> $GITHUB_OUTPUT
-          fi
-
   build:
-    name: Build TDLib [${{ matrix.interface }}]
-    needs: prepare
+    name: Build TDLib [Java]
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        interface: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
       - name: Checkout your repo
@@ -64,20 +34,7 @@ jobs:
           echo "TDLIB_COMMIT_SHORT=$TDLIB_COMMIT_SHORT" >> $GITHUB_ENV
           echo "Latest TDLib commit: $TDLIB_COMMIT_SHORT"
 
-      - name: Check if version already built
-        run: |
-          # Find any existing folder matching this commit
-          EXISTING=$(find tdlib -maxdepth 2 -type d -name "${{ matrix.interface }}" 2>/dev/null | head -1)
-          if [ -n "$EXISTING" ]; then
-            echo "SKIP=true" >> $GITHUB_ENV
-            echo "Already built, skipping: $EXISTING"
-          else
-            echo "SKIP=false" >> $GITHUB_ENV
-            echo "Not found, will build..."
-          fi
-
       - name: Clone TDLib & get version
-        if: env.SKIP != 'true'
         run: |
           git clone https://github.com/tdlib/td.git
           cd td
@@ -99,25 +56,21 @@ jobs:
           echo "TDLib version: $TDLIB_VERSION (commit: $TDLIB_COMMIT)"
 
       - name: Get build time
-        if: env.SKIP != 'true'
         run: echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
-        if: env.SKIP != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Cache Docker layers
-        if: env.SKIP != 'true'
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.interface }}-${{ env.TDLIB_COMMIT }}
+          key: ${{ runner.os }}-buildx-Java-${{ env.TDLIB_COMMIT }}
           restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.interface }}-
+            ${{ runner.os }}-buildx-Java-
             ${{ runner.os }}-buildx-
 
       - name: Build TDLib via Docker
-        if: env.SKIP != 'true'
         working-directory: td/example/android
         run: |
           COMMIT_ARG=""
@@ -126,7 +79,7 @@ jobs:
           fi
 
           docker buildx build \
-            --build-arg TDLIB_INTERFACE=${{ matrix.interface }} \
+            --build-arg TDLIB_INTERFACE=Java \
             $COMMIT_ARG \
             --cache-from type=local,src=/tmp/.buildx-cache \
             --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
@@ -134,13 +87,12 @@ jobs:
             .
 
       - name: Rotate cache
-        if: env.SKIP != 'true' && success()
+        if: success()
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Verify & extract tdlib.zip
-        if: env.SKIP != 'true'
         run: |
           if [ ! -f td/example/android/tdlib/tdlib.zip ]; then
             echo "ERROR: tdlib.zip not found!"
@@ -150,17 +102,16 @@ jobs:
           mkdir -p /tmp/tdlib-extract
           unzip -o td/example/android/tdlib/tdlib.zip -d /tmp/tdlib-extract/
 
-          mkdir -p tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}
-          cp -r /tmp/tdlib-extract/tdlib/. tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}/
+          mkdir -p tdlib/v${{ env.TDLIB_VERSION }}/Java
+          cp -r /tmp/tdlib-extract/tdlib/. tdlib/v${{ env.TDLIB_VERSION }}/Java/
           rm -rf /tmp/tdlib-extract
 
           echo "=== Final structure ==="
-          find tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }} -type f
+          find tdlib/v${{ env.TDLIB_VERSION }}/Java -type f
 
       - name: Package per ABI zip (so + java sources)
-        if: env.SKIP != 'true'
         run: |
-          EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/${{ matrix.interface }}
+          EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
           LIBS_DIR=$EXTRACTED/libs
 
           SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
@@ -185,39 +136,20 @@ jobs:
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
 
-      - name: Commit and push all extracted files
-        if: env.SKIP != 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add tdlib/v${{ env.TDLIB_VERSION }}/
-
-          for i in 1 2 3 4 5; do
-            echo "Push attempt $i..."
-            git pull --rebase origin main || true
-            git add tdlib/v${{ env.TDLIB_VERSION }}/
-            git commit -m "Build TDLib ${{ env.TDLIB_VERSION }} (${{ env.TDLIB_COMMIT }}) [${{ matrix.interface }}]" || echo "Nothing to commit"
-            git push && echo "Push successful!" && break
-            echo "Push failed, retrying..."
-            sleep $((RANDOM % 10 + 5))
-          done
-
       - name: Create GitHub Release
-        if: env.SKIP != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.TDLIB_VERSION }}-${{ matrix.interface }}
-          name: TDLib ${{ env.TDLIB_VERSION }} [${{ matrix.interface }}]
+          tag_name: v${{ env.TDLIB_VERSION }}-Java
+          name: TDLib ${{ env.TDLIB_VERSION }} [Java]
           make_latest: true
           body: |
-            ```
+```
             Version   : ${{ env.TDLIB_VERSION }}
             Commit    : ${{ env.TDLIB_COMMIT }}
-            Interface : ${{ matrix.interface }}
+            Interface : Java
             Built     : ${{ env.BUILD_TIME }}
             Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
-            ```
+```
           files: |
             td/example/android/tdlib/tdlib.zip
             /tmp/tdlib-arm64-v8a.zip
@@ -233,7 +165,6 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Version | ${{ env.TDLIB_VERSION }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | ${{ env.TDLIB_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Interface | ${{ matrix.interface }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Interface | Java |" >> $GITHUB_STEP_SUMMARY
           echo "| Built | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skipped | ${{ env.SKIP }} |" >> $GITHUB_STEP_SUMMARY
