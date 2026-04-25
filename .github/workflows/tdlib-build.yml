@@ -1,0 +1,168 @@
+name: Build TDLib for Android (Release)
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      tdlib_commit:
+        description: 'TDLib commit hash (leave empty for latest)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build TDLib [Java]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+
+      - name: Get latest TDLib version without full clone
+        run: |
+          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
+            TDLIB_COMMIT_SHORT="${{ github.event.inputs.tdlib_commit }}"
+          else
+            TDLIB_COMMIT=$(git ls-remote https://github.com/tdlib/td.git HEAD | cut -f1)
+            TDLIB_COMMIT_SHORT=${TDLIB_COMMIT::7}
+          fi
+          echo "TDLIB_COMMIT_SHORT=$TDLIB_COMMIT_SHORT" >> $GITHUB_ENV
+          echo "Latest TDLib commit: $TDLIB_COMMIT_SHORT"
+
+      - name: Clone TDLib & get version
+        run: |
+          git clone https://github.com/tdlib/td.git
+          cd td
+
+          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
+            git checkout ${{ github.event.inputs.tdlib_commit }}
+          fi
+
+          TDLIB_VERSION=$(grep -oP '(?<=TDLib VERSION )\S+' CMakeLists.txt)
+          TDLIB_COMMIT=$(git rev-parse --short HEAD)
+
+          if [ -z "$TDLIB_VERSION" ]; then
+            echo "ERROR: TDLIB_VERSION is empty!"
+            exit 1
+          fi
+
+          echo "TDLIB_VERSION=$TDLIB_VERSION" >> $GITHUB_ENV
+          echo "TDLIB_COMMIT=$TDLIB_COMMIT" >> $GITHUB_ENV
+          echo "TDLib version: $TDLIB_VERSION (commit: $TDLIB_COMMIT)"
+
+      - name: Get build time
+        run: echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-Java-${{ env.TDLIB_COMMIT }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-Java-
+            ${{ runner.os }}-buildx-
+
+      - name: Build TDLib via Docker
+        working-directory: td/example/android
+        run: |
+          COMMIT_ARG=""
+          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
+            COMMIT_ARG="--build-arg COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}"
+          fi
+
+          docker buildx build \
+            --build-arg TDLIB_INTERFACE=Java \
+            $COMMIT_ARG \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --output tdlib \
+            .
+
+      - name: Rotate cache
+        if: success()
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Verify & extract tdlib.zip
+        run: |
+          if [ ! -f td/example/android/tdlib/tdlib.zip ]; then
+            echo "ERROR: tdlib.zip not found!"
+            exit 1
+          fi
+
+          mkdir -p /tmp/tdlib-extract
+          unzip -o td/example/android/tdlib/tdlib.zip -d /tmp/tdlib-extract/
+
+          mkdir -p tdlib/v${{ env.TDLIB_VERSION }}/Java
+          cp -r /tmp/tdlib-extract/tdlib/. tdlib/v${{ env.TDLIB_VERSION }}/Java/
+          rm -rf /tmp/tdlib-extract
+
+          echo "=== Final structure ==="
+          find tdlib/v${{ env.TDLIB_VERSION }}/Java -type f
+
+      - name: Package per ABI zip (so + java sources)
+        run: |
+          EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
+          LIBS_DIR=$EXTRACTED/libs
+
+          SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
+          echo "Detected .so file: $SO_FILE"
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            echo "Packaging $ABI..."
+            mkdir -p /tmp/tdlib-$ABI/libs/$ABI
+
+            cp $LIBS_DIR/$ABI/$SO_FILE /tmp/tdlib-$ABI/libs/$ABI/
+
+            if [ -d "$EXTRACTED/java" ]; then
+              mkdir -p /tmp/tdlib-$ABI/java
+              cp -r $EXTRACTED/java/. /tmp/tdlib-$ABI/java/
+            fi
+
+            cd /tmp/tdlib-$ABI
+            zip -r /tmp/tdlib-$ABI.zip .
+            cd -
+          done
+
+          echo "All ABI zips created:"
+          ls -lah /tmp/tdlib-*.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}-Java
+          name: TDLib ${{ env.TDLIB_VERSION }} [Java]
+          make_latest: true
+          body: |
+            Version   : ${{ env.TDLIB_VERSION }}
+            Commit    : ${{ env.TDLIB_COMMIT }}
+            Interface : Java
+            Built     : ${{ env.BUILD_TIME }}
+            Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
+          files: |
+            td/example/android/tdlib/tdlib.zip
+            /tmp/tdlib-arm64-v8a.zip
+            /tmp/tdlib-armeabi-v7a.zip
+            /tmp/tdlib-x86.zip
+            /tmp/tdlib-x86_64.zip
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## TDLib Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ env.TDLIB_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ env.TDLIB_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Interface | Java |" >> $GITHUB_STEP_SUMMARY
+          echo "| Built | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
