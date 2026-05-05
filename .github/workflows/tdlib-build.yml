@@ -55,13 +55,29 @@ jobs:
           echo "TDLIB_COMMIT=$TDLIB_COMMIT" >> $GITHUB_ENV
           echo "TDLib version: $TDLIB_VERSION (commit: $TDLIB_COMMIT)"
 
+      - name: Check if version already released
+        id: version_check
+        run: |
+          RELEASE_TAG="v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}-Java"
+          
+          if git ls-remote --exit-code --tags origin "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo "Version $RELEASE_TAG already released. Skipping build."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $RELEASE_TAG is new. Proceeding with build."
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Get build time
+        if: steps.version_check.outputs.skip_build == 'false'
         run: echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
+        if: steps.version_check.outputs.skip_build == 'false'
         uses: docker/setup-buildx-action@v3
 
       - name: Cache Docker layers
+        if: steps.version_check.outputs.skip_build == 'false'
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
@@ -71,6 +87,7 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: Build TDLib via Docker
+        if: steps.version_check.outputs.skip_build == 'false'
         working-directory: td/example/android
         run: |
           COMMIT_ARG=""
@@ -87,12 +104,13 @@ jobs:
             .
 
       - name: Rotate cache
-        if: success()
+        if: steps.version_check.outputs.skip_build == 'false' && success()
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Verify & extract tdlib.zip
+        if: steps.version_check.outputs.skip_build == 'false'
         run: |
           if [ ! -f td/example/android/tdlib/tdlib.zip ]; then
             echo "ERROR: tdlib.zip not found!"
@@ -110,6 +128,7 @@ jobs:
           find tdlib/v${{ env.TDLIB_VERSION }}/Java -type f
 
       - name: Package per ABI zip (so + java sources)
+        if: steps.version_check.outputs.skip_build == 'false'
         run: |
           EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
           LIBS_DIR=$EXTRACTED/libs
@@ -137,6 +156,7 @@ jobs:
           ls -lah /tmp/tdlib-*.zip
 
       - name: Create GitHub Release
+        if: steps.version_check.outputs.skip_build == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}-Java
@@ -165,4 +185,5 @@ jobs:
           echo "| Commit | ${{ env.TDLIB_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Interface | Java |" >> $GITHUB_STEP_SUMMARY
           echo "| Built | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skipped | ${{ steps.version_check.outputs.skip_build }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
