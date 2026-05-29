@@ -1,0 +1,38 @@
+name: TDLib TdApi JAR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Fetch Java sources
+        run: |
+          git clone --depth=1 https://github.com/tdlib/td.git
+          mkdir -p src/org/drinkless/tdlib
+          cp td/example/java/org/drinkless/tdlib/TdApi.java src/org/drinkless/tdlib/
+          cp td/example/java/org/drinkless/tdlib/Client.java src/org/drinkless/tdlib/
+
+      - name: Compile
+        run: |
+          mkdir -p build/classes
+          javac -d build/classes \
+            src/org/drinkless/tdlib/TdApi.java \
+            src/org/drinkless/tdlib/Client.java
+
+      - name: Package JAR
+        run: |
+          jar cf tdlib-java.jar -C build/classes .
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-java
+          path: tdlib-java.jar
