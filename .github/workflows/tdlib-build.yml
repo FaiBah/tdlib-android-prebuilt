@@ -137,8 +137,14 @@ jobs:
             $JAVA_SRC/TdApi.java \
             $JAVA_SRC/Client.java
           jar cf tdlib-java.jar -C build/classes .
-          echo "=== JAR contents ==="
-          jar tf tdlib-java.jar
+
+          mkdir -p /tmp/tdlib-java-bundle
+          cp tdlib-java.jar /tmp/tdlib-java-bundle/
+          cp annotation.jar /tmp/tdlib-java-bundle/
+          cd /tmp/tdlib-java-bundle
+          zip -r /tmp/tdlib-java-bundle.zip .
+          echo "=== Bundle contents ==="
+          unzip -l /tmp/tdlib-java-bundle.zip
 
       - name: Package per ABI zip (so + java sources)
         if: steps.version_check.outputs.skip_build == 'false'
@@ -183,11 +189,11 @@ jobs:
             Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
           files: |
             td/example/android/tdlib/tdlib.zip
+            /tmp/tdlib-java-bundle.zip
             /tmp/tdlib-arm64-v8a.zip
             /tmp/tdlib-armeabi-v7a.zip
             /tmp/tdlib-x86.zip
             /tmp/tdlib-x86_64.zip
-            tdlib-java.jar
 
       - name: Build summary
         if: always()
