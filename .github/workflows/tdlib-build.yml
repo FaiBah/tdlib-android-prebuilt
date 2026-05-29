@@ -127,6 +127,19 @@ jobs:
           echo "=== Final structure ==="
           find tdlib/v${{ env.TDLIB_VERSION }}/Java -type f
 
+      - name: Compile TdApi & Client to JAR
+        if: steps.version_check.outputs.skip_build == 'false'
+        run: |
+          wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/1.7.0/annotation-jvm-1.7.0.jar" -O annotation.jar
+          JAVA_SRC=tdlib/v${{ env.TDLIB_VERSION }}/Java/java/org/drinkless/tdlib
+          mkdir -p build/classes
+          javac -cp annotation.jar -proc:none -d build/classes \
+            $JAVA_SRC/TdApi.java \
+            $JAVA_SRC/Client.java
+          jar cf tdlib-java.jar -C build/classes .
+          echo "=== JAR contents ==="
+          jar tf tdlib-java.jar
+
       - name: Package per ABI zip (so + java sources)
         if: steps.version_check.outputs.skip_build == 'false'
         run: |
@@ -174,6 +187,7 @@ jobs:
             /tmp/tdlib-armeabi-v7a.zip
             /tmp/tdlib-x86.zip
             /tmp/tdlib-x86_64.zip
+            tdlib-java.jar
 
       - name: Build summary
         if: always()
