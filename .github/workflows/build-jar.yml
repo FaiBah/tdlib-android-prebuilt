@@ -95,12 +95,15 @@ jobs:
 
           echo "=== Final structure ==="
           find tdlib/v${{ env.TDLIB_VERSION }}/Java -type f
-
+        
       - name: Compile TdApi & Client to JAR
         run: |
+          # Download androidx.annotation-jvm (plain JAR, no AAR extraction needed)
+          wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/1.7.0/annotation-jvm-1.7.0.jar" -O annotation.jar
+
           JAVA_SRC=tdlib/v${{ env.TDLIB_VERSION }}/Java/java/org/drinkless/tdlib
           mkdir -p build/classes
-          javac -d build/classes \
+          javac -cp annotation.jar -proc:none -d build/classes \
             $JAVA_SRC/TdApi.java \
             $JAVA_SRC/Client.java
           jar cf tdlib-java.jar -C build/classes .
