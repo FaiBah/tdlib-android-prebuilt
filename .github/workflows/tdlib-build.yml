@@ -81,20 +81,18 @@ jobs:
 
       - name: Cache annotation JAR
         if: steps.version_check.outputs.skip_build == 'false'
+        id: cache-annotation
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/annotation.jar
           key: annotation-jvm-${{ env.ANNOTATION_VERSION }}
 
       - name: Download annotation JAR
-        if: steps.version_check.outputs.skip_build == 'false'
+        if: steps.version_check.outputs.skip_build == 'false' && steps.cache-annotation.outputs.cache-hit != 'true'
         run: |
-          ANNOTATION_JAR=$GITHUB_WORKSPACE/annotation.jar
-          if [ ! -f "$ANNOTATION_JAR" ]; then
-            wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/${{ env.ANNOTATION_VERSION }}/annotation-jvm-${{ env.ANNOTATION_VERSION }}.jar" \
-              -O "$ANNOTATION_JAR"
-          fi
-          echo "annotation.jar size: $(du -sh $ANNOTATION_JAR)"
+          wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/${{ env.ANNOTATION_VERSION }}/annotation-jvm-${{ env.ANNOTATION_VERSION }}.jar" \
+            -O "$GITHUB_WORKSPACE/annotation.jar"
+          echo "annotation.jar size: $(du -sh $GITHUB_WORKSPACE/annotation.jar)"
 
       - name: Build TDLib via Docker
         if: steps.version_check.outputs.skip_build == 'false'
@@ -213,15 +211,14 @@ jobs:
       - name: Generate checksums
         if: steps.version_check.outputs.skip_build == 'false'
         run: |
-          sha256sum \
-            td/example/android/tdlib/tdlib.zip \
-            /tmp/tdlib-java-bundle.zip \
-            /tmp/tdlib-arm64-v8a.zip \
-            /tmp/tdlib-armeabi-v7a.zip \
-            /tmp/tdlib-x86.zip \
-            /tmp/tdlib-x86_64.zip \
-            /tmp/tdlib.aar \
-            > /tmp/checksums.txt
+          (cd td/example/android/tdlib && sha256sum tdlib.zip) > /tmp/checksums.txt
+          (cd /tmp && sha256sum \
+            tdlib-java-bundle.zip \
+            tdlib-arm64-v8a.zip \
+            tdlib-armeabi-v7a.zip \
+            tdlib-x86.zip \
+            tdlib-x86_64.zip \
+            tdlib.aar) >> /tmp/checksums.txt
           cat /tmp/checksums.txt
 
       - name: Create GitHub Release
