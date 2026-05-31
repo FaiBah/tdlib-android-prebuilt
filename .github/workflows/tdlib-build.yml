@@ -19,28 +19,22 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
+    env:
+      ANNOTATION_VERSION: "1.7.0"
+
     steps:
       - name: Checkout your repo
         uses: actions/checkout@v4
 
-      - name: Get latest TDLib version without full clone
-        run: |
-          if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
-            TDLIB_COMMIT_SHORT="${{ github.event.inputs.tdlib_commit }}"
-          else
-            TDLIB_COMMIT=$(git ls-remote https://github.com/tdlib/td.git HEAD | cut -f1)
-            TDLIB_COMMIT_SHORT=${TDLIB_COMMIT::7}
-          fi
-          echo "TDLIB_COMMIT_SHORT=$TDLIB_COMMIT_SHORT" >> $GITHUB_ENV
-          echo "Latest TDLib commit: $TDLIB_COMMIT_SHORT"
-
       - name: Clone TDLib & get version
         run: |
-          git clone https://github.com/tdlib/td.git
-          cd td
-
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
-            git checkout ${{ github.event.inputs.tdlib_commit }}
+            git clone --filter=blob:none --no-checkout https://github.com/tdlib/td.git td
+            cd td
+            git checkout "${{ github.event.inputs.tdlib_commit }}"
+          else
+            git clone --depth 1 https://github.com/tdlib/td.git td
+            cd td
           fi
 
           TDLIB_VERSION=$(grep -oP '(?<=TDLib VERSION )\S+' CMakeLists.txt)
@@ -85,18 +79,34 @@ jobs:
             ${{ runner.os }}-buildx-Java-
             ${{ runner.os }}-buildx-
 
+      - name: Cache annotation JAR
+        if: steps.version_check.outputs.skip_build == 'false'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/annotation.jar
+          key: annotation-jvm-${{ env.ANNOTATION_VERSION }}
+
+      - name: Download annotation JAR
+        if: steps.version_check.outputs.skip_build == 'false'
+        run: |
+          ANNOTATION_JAR=$GITHUB_WORKSPACE/annotation.jar
+          if [ ! -f "$ANNOTATION_JAR" ]; then
+            wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/${{ env.ANNOTATION_VERSION }}/annotation-jvm-${{ env.ANNOTATION_VERSION }}.jar" \
+              -O "$ANNOTATION_JAR"
+          fi
+          echo "annotation.jar size: $(du -sh $ANNOTATION_JAR)"
+
       - name: Build TDLib via Docker
         if: steps.version_check.outputs.skip_build == 'false'
         working-directory: td/example/android
         run: |
-          COMMIT_ARG=""
+          BUILD_ARGS=(--build-arg TDLIB_INTERFACE=Java)
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
-            COMMIT_ARG="--build-arg COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}"
+            BUILD_ARGS+=(--build-arg "COMMIT_HASH=${{ github.event.inputs.tdlib_commit }}")
           fi
 
           docker buildx build \
-            --build-arg TDLIB_INTERFACE=Java \
-            $COMMIT_ARG \
+            "${BUILD_ARGS[@]}" \
             --cache-from type=local,src=/tmp/.buildx-cache \
             --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
             --output tdlib \
@@ -129,19 +139,19 @@ jobs:
       - name: Compile TdApi & Client to JAR
         if: steps.version_check.outputs.skip_build == 'false'
         run: |
-          wget -q "https://maven.google.com/androidx/annotation/annotation-jvm/1.7.0/annotation-jvm-1.7.0.jar" -O annotation.jar
+          ANNOTATION_JAR=$GITHUB_WORKSPACE/annotation.jar
           JAVA_SRC=tdlib/v${{ env.TDLIB_VERSION }}/Java/java/org/drinkless/tdlib
+
           mkdir -p build/classes
-          javac -cp annotation.jar -proc:none -d build/classes \
+          javac -cp "$ANNOTATION_JAR" -proc:none -d build/classes \
             $JAVA_SRC/TdApi.java \
             $JAVA_SRC/Client.java
           jar cf tdlib-java.jar -C build/classes .
 
           mkdir -p /tmp/tdlib-java-bundle
           cp tdlib-java.jar /tmp/tdlib-java-bundle/
-          cp annotation.jar /tmp/tdlib-java-bundle/
-          cd /tmp/tdlib-java-bundle
-          zip -r /tmp/tdlib-java-bundle.zip .
+          cp "$ANNOTATION_JAR" /tmp/tdlib-java-bundle/
+          (cd /tmp/tdlib-java-bundle && zip -r /tmp/tdlib-java-bundle.zip .)
           echo "=== Bundle contents ==="
           unzip -l /tmp/tdlib-java-bundle.zip
 
@@ -151,20 +161,18 @@ jobs:
           EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
           LIBS_DIR=$EXTRACTED/libs
 
-          SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
+          SO_FILE=$(basename "$(find "$LIBS_DIR/arm64-v8a" -name "*.so" | head -1)")
           echo "Detected .so file: $SO_FILE"
 
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             echo "Packaging $ABI..."
             mkdir -p /tmp/tdlib-$ABI/libs/$ABI
-            cp $LIBS_DIR/$ABI/$SO_FILE /tmp/tdlib-$ABI/libs/$ABI/
+            cp "$LIBS_DIR/$ABI/$SO_FILE" "/tmp/tdlib-$ABI/libs/$ABI/"
             if [ -d "$EXTRACTED/java" ]; then
               mkdir -p /tmp/tdlib-$ABI/java
-              cp -r $EXTRACTED/java/. /tmp/tdlib-$ABI/java/
+              cp -r "$EXTRACTED/java/." "/tmp/tdlib-$ABI/java/"
             fi
-            cd /tmp/tdlib-$ABI
-            zip -r /tmp/tdlib-$ABI.zip .
-            cd -
+            (cd /tmp/tdlib-$ABI && zip -r /tmp/tdlib-$ABI.zip .)
           done
 
           echo "All ABI zips created:"
@@ -175,35 +183,46 @@ jobs:
         run: |
           EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
           LIBS_DIR=$EXTRACTED/libs
+          ANNOTATION_JAR=$GITHUB_WORKSPACE/annotation.jar
 
           AAR_DIR=/tmp/tdlib-aar
           mkdir -p $AAR_DIR/jni/arm64-v8a $AAR_DIR/jni/armeabi-v7a $AAR_DIR/jni/x86 $AAR_DIR/jni/x86_64
 
-          SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
+          SO_FILE=$(basename "$(find "$LIBS_DIR/arm64-v8a" -name "*.so" | head -1)")
 
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
-            cp $LIBS_DIR/$ABI/$SO_FILE $AAR_DIR/jni/$ABI/
+            cp "$LIBS_DIR/$ABI/$SO_FILE" "$AAR_DIR/jni/$ABI/"
           done
 
           JAVA_SRC=$EXTRACTED/java/org/drinkless/tdlib
           mkdir -p /tmp/aar-classes
-          javac -cp annotation.jar -proc:none -d /tmp/aar-classes \
+          javac -cp "$ANNOTATION_JAR" -proc:none -d /tmp/aar-classes \
             $JAVA_SRC/TdApi.java \
             $JAVA_SRC/Client.java
 
-          cd /tmp/aar-classes
-          jar xf $GITHUB_WORKSPACE/annotation.jar
-          cd -
           jar cf $AAR_DIR/classes.jar -C /tmp/aar-classes .
 
-          cat > $AAR_DIR/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.drinkless.tdlib" />
-          EOF
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.drinkless.tdlib" />' \
+            > $AAR_DIR/AndroidManifest.xml
 
-          cd $AAR_DIR
-          zip -r /tmp/tdlib.aar .
+          (cd $AAR_DIR && zip -r /tmp/tdlib.aar .)
           echo "AAR size: $(du -sh /tmp/tdlib.aar)"
+
+      - name: Generate checksums
+        if: steps.version_check.outputs.skip_build == 'false'
+        run: |
+          sha256sum \
+            td/example/android/tdlib/tdlib.zip \
+            /tmp/tdlib-java-bundle.zip \
+            /tmp/tdlib-arm64-v8a.zip \
+            /tmp/tdlib-armeabi-v7a.zip \
+            /tmp/tdlib-x86.zip \
+            /tmp/tdlib-x86_64.zip \
+            /tmp/tdlib.aar \
+            > /tmp/checksums.txt
+          cat /tmp/checksums.txt
 
       - name: Create GitHub Release
         if: steps.version_check.outputs.skip_build == 'false'
@@ -226,16 +245,22 @@ jobs:
             /tmp/tdlib-x86.zip
             /tmp/tdlib-x86_64.zip
             /tmp/tdlib.aar
+            /tmp/checksums.txt
 
       - name: Build summary
         if: always()
         run: |
+          SKIPPED="${{ steps.version_check.outputs.skip_build }}"
           echo "## TDLib Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ env.TDLIB_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ env.TDLIB_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version   | ${{ env.TDLIB_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit    | ${{ env.TDLIB_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Interface | Java |" >> $GITHUB_STEP_SUMMARY
-          echo "| Built | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skipped | ${{ steps.version_check.outputs.skip_build }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "$SKIPPED" = "true" ]; then
+            echo "| Built     | N/A (already released) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Built     | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "| Skipped   | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status    | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
