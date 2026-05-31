@@ -2,7 +2,7 @@ name: Build TDLib for Android (Release)
 
 on:
   schedule:
-    - cron: '0 0 */2 * *'  # every 2 days at 00:00 UTC
+    - cron: '0 0 */2 * *'
   workflow_dispatch:
     inputs:
       tdlib_commit:
@@ -59,7 +59,6 @@ jobs:
         id: version_check
         run: |
           RELEASE_TAG="v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}-Java"
-          
           if git ls-remote --exit-code --tags origin "$RELEASE_TAG" > /dev/null 2>&1; then
             echo "Version $RELEASE_TAG already released. Skipping build."
             echo "skip_build=true" >> $GITHUB_OUTPUT
@@ -158,14 +157,11 @@ jobs:
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             echo "Packaging $ABI..."
             mkdir -p /tmp/tdlib-$ABI/libs/$ABI
-
             cp $LIBS_DIR/$ABI/$SO_FILE /tmp/tdlib-$ABI/libs/$ABI/
-
             if [ -d "$EXTRACTED/java" ]; then
               mkdir -p /tmp/tdlib-$ABI/java
               cp -r $EXTRACTED/java/. /tmp/tdlib-$ABI/java/
             fi
-
             cd /tmp/tdlib-$ABI
             zip -r /tmp/tdlib-$ABI.zip .
             cd -
@@ -173,6 +169,41 @@ jobs:
 
           echo "All ABI zips created:"
           ls -lah /tmp/tdlib-*.zip
+
+      - name: Build AAR
+        if: steps.version_check.outputs.skip_build == 'false'
+        run: |
+          EXTRACTED=tdlib/v${{ env.TDLIB_VERSION }}/Java
+          LIBS_DIR=$EXTRACTED/libs
+
+          AAR_DIR=/tmp/tdlib-aar
+          mkdir -p $AAR_DIR/jni/arm64-v8a $AAR_DIR/jni/armeabi-v7a $AAR_DIR/jni/x86 $AAR_DIR/jni/x86_64
+
+          SO_FILE=$(find $LIBS_DIR/arm64-v8a -name "*.so" -printf "%f\n" | head -1)
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            cp $LIBS_DIR/$ABI/$SO_FILE $AAR_DIR/jni/$ABI/
+          done
+
+          JAVA_SRC=$EXTRACTED/java/org/drinkless/tdlib
+          mkdir -p /tmp/aar-classes
+          javac -cp annotation.jar -proc:none -d /tmp/aar-classes \
+            $JAVA_SRC/TdApi.java \
+            $JAVA_SRC/Client.java
+
+          cd /tmp/aar-classes
+          jar xf $GITHUB_WORKSPACE/annotation.jar
+          cd -
+          jar cf $AAR_DIR/classes.jar -C /tmp/aar-classes .
+
+          cat > $AAR_DIR/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.drinkless.tdlib" />
+          EOF
+
+          cd $AAR_DIR
+          zip -r /tmp/tdlib.aar .
+          echo "AAR size: $(du -sh /tmp/tdlib.aar)"
 
       - name: Create GitHub Release
         if: steps.version_check.outputs.skip_build == 'false'
@@ -194,6 +225,7 @@ jobs:
             /tmp/tdlib-armeabi-v7a.zip
             /tmp/tdlib-x86.zip
             /tmp/tdlib-x86_64.zip
+            /tmp/tdlib.aar
 
       - name: Build summary
         if: always()
