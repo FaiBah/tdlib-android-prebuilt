@@ -1,6 +1,8 @@
 name: Build TDLib for Android (Java + JSON)
 
 on:
+  schedule:
+    - cron: '0 0 * * 0'
   workflow_dispatch:
     inputs:
       tdlib_commit:
@@ -254,11 +256,22 @@ jobs:
           name: TDLib ${{ env.TDLIB_VERSION }} [${{ matrix.interface }}]
           make_latest: ${{ matrix.interface == 'Java' }}
           body: |
-            Version   : ${{ env.TDLIB_VERSION }}
-            Commit    : ${{ env.TDLIB_COMMIT }}
-            Interface : ${{ matrix.interface }}
-            Built     : ${{ env.BUILD_TIME }}
-            Source    : https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
+            📦 **TDLib Version:** ${{ env.TDLIB_VERSION }}
+            🔗 **Source Commit:** ${{ env.TDLIB_COMMIT }}
+            ⚙️ **Interface:** ${{ matrix.interface }}
+            🕒 **Build Date:** ${{ env.BUILD_TIME }}
+            📄 **Upstream Source:** https://github.com/tdlib/td/commit/${{ env.TDLIB_COMMIT }}
+
+            ---
+
+            This release contains prebuilt TDLib binaries for Android, targeting the following ABIs:
+
+            - `arm64-v8a`
+            - `armeabi-v7a`
+            - `x86`
+            - `x86_64`
+
+            All binaries are compiled automatically from the upstream TDLib source referenced above.
           files: |
             td/example/android/tdlib/tdlib.zip
             ${{ matrix.interface == 'Java' && '/tmp/tdlib-java-bundle.zip' || '' }}
