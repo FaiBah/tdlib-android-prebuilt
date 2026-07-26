@@ -4,7 +4,6 @@
 
 **Prebuilt [TDLib](https://github.com/tdlib/td) binaries for Android — built automatically, so you don't have to.**
 
-[![Build](https://img.shields.io/github/actions/workflow/status/FaiBah/tdlib-android-prebuilt/build-tdlib-android.yml?label=build&style=flat-square)](../../actions)
 [![Latest Release](https://img.shields.io/github/v/release/FaiBah/tdlib-android-prebuilt?style=flat-square&label=latest)](../../releases/latest)
 [![License](https://img.shields.io/badge/TDLib_License-BSL_1.0-blue?style=flat-square)](https://github.com/tdlib/td/blob/master/LICENSE_1_0.txt)
 
