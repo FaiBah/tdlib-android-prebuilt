@@ -31,7 +31,10 @@ jobs:
           if [ -n "${{ github.event.inputs.tdlib_commit }}" ]; then
             git clone --filter=blob:none --no-checkout https://github.com/tdlib/td.git td
             cd td
-            git checkout "${{ github.event.inputs.tdlib_commit }}"
+            if ! git checkout "${{ github.event.inputs.tdlib_commit }}" 2>/dev/null; then
+              echo "ERROR: '${{ github.event.inputs.tdlib_commit }}' is not a valid commit in tdlib/td"
+              exit 1
+            fi
           else
             git clone --depth 1 https://github.com/tdlib/td.git td
             cd td
@@ -163,6 +166,13 @@ jobs:
           echo "Detected .so file: $SO_FILE"
 
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ ! -f "$LIBS_DIR/$ABI/$SO_FILE" ]; then
+              echo "ERROR: missing $SO_FILE for ABI $ABI"
+              exit 1
+            fi
+          done
+
+          for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
             echo "Packaging $ABI..."
             mkdir -p /tmp/tdlib-$ABI/libs/$ABI
             cp "$LIBS_DIR/$ABI/$SO_FILE" "/tmp/tdlib-$ABI/libs/$ABI/"
@@ -189,6 +199,10 @@ jobs:
           SO_FILE=$(basename "$(find "$LIBS_DIR/arm64-v8a" -name "*.so" | head -1)")
 
           for ABI in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ ! -f "$LIBS_DIR/$ABI/$SO_FILE" ]; then
+              echo "ERROR: missing $SO_FILE for ABI $ABI"
+              exit 1
+            fi
             cp "$LIBS_DIR/$ABI/$SO_FILE" "$AAR_DIR/jni/$ABI/"
           done
 
@@ -207,19 +221,6 @@ jobs:
 
           (cd $AAR_DIR && zip -r /tmp/tdlib.aar .)
           echo "AAR size: $(du -sh /tmp/tdlib.aar)"
-
-      - name: Generate checksums
-        if: steps.version_check.outputs.skip_build == 'false'
-        run: |
-          (cd td/example/android/tdlib && sha256sum tdlib.zip) > /tmp/checksums.txt
-          (cd /tmp && sha256sum \
-            tdlib-java-bundle.zip \
-            tdlib-arm64-v8a.zip \
-            tdlib-armeabi-v7a.zip \
-            tdlib-x86.zip \
-            tdlib-x86_64.zip \
-            tdlib.aar) >> /tmp/checksums.txt
-          cat /tmp/checksums.txt
 
       - name: Create GitHub Release
         if: steps.version_check.outputs.skip_build == 'false'
@@ -242,7 +243,6 @@ jobs:
             /tmp/tdlib-x86.zip
             /tmp/tdlib-x86_64.zip
             /tmp/tdlib.aar
-            /tmp/checksums.txt
 
       - name: Build summary
         if: always()
