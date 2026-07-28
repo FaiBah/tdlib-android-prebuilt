@@ -246,4 +246,3 @@ jobs:
           echo "| Interface | Java |" >> $GITHUB_STEP_SUMMARY
           echo "| Built     | ${{ env.BUILD_TIME }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Status    | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-          
