@@ -227,11 +227,68 @@ jobs:
           echo "=== Files staged for artifact upload ==="
           ls -lah /tmp/upload/
 
-      - name: Upload build artifact
+      - name: Upload tdlib.zip
         uses: actions/upload-artifact@v4
         with:
-          name: tdlib-android-java-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
-          path: /tmp/upload/*
+          name: tdlib-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-debug.zip
+        if: steps.debug_check.outputs.has_debug == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-debug-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-debug.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-java-bundle.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-java-bundle-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-java-bundle.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-arm64-v8a.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-arm64-v8a-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-arm64-v8a.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-armeabi-v7a.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-armeabi-v7a-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-armeabi-v7a.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-x86.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-x86-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-x86.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib-x86_64.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-x86_64-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib-x86_64.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload tdlib.aar
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-aar-v${{ env.TDLIB_VERSION }}-${{ env.TDLIB_COMMIT }}
+          path: /tmp/upload/tdlib.aar
           retention-days: 30
           if-no-files-found: error
 
